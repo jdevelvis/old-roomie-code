@@ -1,7 +1,9 @@
 var WebSocket = require('ws'),
+	speakeasy = require('speakeasy'),
 	spawn = require('child_process').spawn,
 	fs = require('fs'),
-	isEmpty = require('underscore').isEmpty;
+	isEmpty = require('underscore').isEmpty,
+	ThingAPI = require('thing-client');
 
 var db_file = "ehma-com.db";
 var db_exists = fs.existsSync(db_file);
@@ -14,8 +16,9 @@ var init = exports.init = function(callback) {
 
 	//Check if it's in the database first
 	if (db_exists) {
-		self.getConfig();
-		callback();
+		//Great! The Thing is already paired! Now authenticate
+		console.log("Database exists!");
+		self.getConfig(self, function() { console.log("config: " + JSON.stringify(config,null,4)); self.authenticate(self,callback); });
 	} else {
 		self.config = {};
 		self.config['name'] = "EHMAcom";
@@ -30,7 +33,8 @@ var init = exports.init = function(callback) {
 
         	var matched = data.match(/Serial\s*:\s(.+)/);
 	        if (!isEmpty(matched) && !isEmpty(matched[1])) {
-	            self.pair('ehmacom' + matched[1].toString(),saveConfig);
+				//Pair then authenticate
+	            self.pair('ehmacom' + matched[1].toString(),function() { self.authenticate(callback); });
    		    }
 	    });
 
@@ -44,6 +48,26 @@ var init = exports.init = function(callback) {
 	}
 }
 
+var authenticate = exports.authenticate = function(self, callback, tries) {
+	if (isNaN(tries)) tries = 0;
+
+	console.log("Authenticating...");
+
+	var totp = speakeasy.totp({key:config['params']['base32'],step:config['params']['step'],encoding:'base32'});
+
+	console.log(totp);
+
+	this.sendMessage('manage',{path:'/api/v1/thing/hello/' + config['thingID'],requestID:'100002',response:totp}, function(data) {
+		//If we're receiving it here, it's either a result or an error
+		console.log("data: " + JSON.stringify(data,null,4));
+		if (!isEmpty(data['result'])) {
+			console.log('Result!');
+		} else if (!isEmpty(data['error'])) {
+			console.log('Error...');
+		}
+	});
+}
+
 var saveConfig = exports.saveConfig = function (config_to_save) {
 	//Create or overwrite the config file
 	//### Add a try/catch block here to catch any file write errors
@@ -51,17 +75,13 @@ var saveConfig = exports.saveConfig = function (config_to_save) {
 	fs.writeFileSync(db_file,JSON.stringify(config_to_save),'utf8');
 }
 
-var getConfig = exports.getConfig = function () {
-	var self = this;
+var getConfig = exports.getConfig = function (self, callback) {
+	console.log("config: " + JSON.stringify(config,null,4));
 
-	var data = fs.readFileSync(db_file,'utf8');
-
-	if (!isEmpty(data)) {
-		self.config = JSON.parse(data);
-		return true;
-	} else {
-		return false;
-	}
+	fs.readFile(db_file,'utf8', function(err, data) {
+		config = JSON.parse(data);
+		callback();
+	});
 }
 
 var pair = exports.pair = function(uuid, callback) {
@@ -92,12 +112,12 @@ var pair = exports.pair = function(uuid, callback) {
 		console.log("Pairing Code: " + self.pairingCode);
 
 		if (!isEmpty(self.pairingCode)) {
-			self.sendMessage('manage', {path:'/api/v1/thing/pair/'+self.config['uuid'],requestID:'100001',name:self.config['name'],pairingCode: self.pairingCode}, completePair);
+			self.sendMessage('manage', {path:'/api/v1/thing/pair/'+self.config['uuid'],requestID:'100001',name:self.config['name'],pairingCode: self.pairingCode}, function(data, self) { completePair(data, self, callback); });
 		}
 	});
 }
 
-var completePair = exports.completePair = function(data, self) {
+var completePair = exports.completePair = function(data, self, callback) {
     if(!isEmpty(data['result'])) {
         if(data['result']['success']) {
             console.log("Success!");
@@ -106,6 +126,7 @@ var completePair = exports.completePair = function(data, self) {
             self.config['params'] = data['result']['params'];
             console.log("Config Set!" + JSON.stringify(self.config,null,4));
 			saveConfig(self.config);
+			callback();
         } else if(!isEmpty(data['error'])) {
             console.log("Error pairing");
         }
@@ -132,9 +153,9 @@ var sendMessage = exports.sendMessage = function(endpoint, message, callback) {
 
     ws.onmessage = function(event) {
         data = JSON.parse(event.data);
+		console.log("Received data:" + JSON.stringify(data,null,4));
 		
 /*
-		console.log("Received data:" + JSON.stringify(data,null,4));
 		console.log("isEmpty(data['result']): " + isEmpty(data['result']));
 		console.log("self.config before result: " + self.config['id']);
 */
