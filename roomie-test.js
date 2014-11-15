@@ -158,13 +158,13 @@ var connect = exports.connect = function(callback) {
 				console.log("Ready...");
 				console.log("Thing ID: " + config.state.thingID);
 
+				if (callback) callback("Ready");
 				thingID = message.things.t1.thingID;
 
 				console.log("STP Thing Data: " + stpThing);
 				stpThing = self;
 				console.log("STP Thing Data: " + stpThing);
-
-				if (callback) callback("Ready");
+//      		getToWork(self, message.things.t1.thingID);
 
 				//Set up the heartbeat to keep the Roomie from going inactive on the Steward
 		  		setInterval(function() {
@@ -278,7 +278,7 @@ var sendCommand = exports.sendCommand = function(command, callback) {
 
                     if (task.perform == 'speak') {
 	                    console.log('>>> speaking: ' + task.parameter);
-						audio.say(task.parameter);
+						audio.speak(task.parameter[0]);
 						response.tasks[taskID] = { success: true };
 						continue;
                     } else if (task.perform == 'play_sound') {
